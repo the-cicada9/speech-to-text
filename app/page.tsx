@@ -2,103 +2,35 @@
 
 import React, { useEffect, useRef, useState } from 'react';
 import { Mic, MicOff } from 'lucide-react';
+import Link from 'next/link';
 
-/**
- * Type definitions for the Web Speech API
- */
 declare global {
-  /** Core SpeechRecognition interface */
-  interface SpeechRecognition extends EventTarget {
-    continuous: boolean;
-    interimResults: boolean;
-    lang: string;
-    onresult: (event: SpeechRecognitionEvent) => void;
-    onend: () => void;
-    onerror: (event: SpeechRecognitionErrorEvent) => void;
-    start: () => void;
-    stop: () => void;
+  interface Window {
+    webkitSpeechRecognition: any;
+    SpeechRecognition: any;
   }
 
-  /** Event fired when a speech recognition error occurs */
-  interface SpeechRecognitionErrorEvent extends Event {
-    readonly error: string;
-    readonly message: string;
-  }
-
-  /** Represents a single speech recognition result */
-  interface SpeechRecognitionAlternative {
-    readonly transcript: string;
-    readonly confidence: number;
-  }
-
-  /** Represents a list of speech recognition results */
-  interface SpeechRecognitionResult {
-    readonly isFinal: boolean;
-    readonly length: number;
-    item(index: number): SpeechRecognitionAlternative;
-    [index: number]: SpeechRecognitionAlternative;
-  }
-
-  /** Represents a list of speech recognition results */
-  interface SpeechRecognitionResultList {
-    readonly length: number;
-    item(index: number): SpeechRecognitionResult;
-    [index: number]: SpeechRecognitionResult;
-  }
-
-  /** Event fired when speech recognition results are available */
   interface SpeechRecognitionEvent extends Event {
     readonly resultIndex: number;
     readonly results: SpeechRecognitionResultList;
   }
-
-  /** Window interface extensions for speech recognition */
-  interface Window {
-    webkitSpeechRecognition: { new (): SpeechRecognition };
-    SpeechRecognition: { new (): SpeechRecognition };
-  }
 }
 
-/**
- * SpeechToText component that provides real-time speech-to-text conversion
- * @returns {JSX.Element} The rendered component
- */
-const SpeechToText = () => {
+const SpeechToLetter = () => {
   const [isListening, setIsListening] = useState(false);
   const [spokenText, setSpokenText] = useState('');
   const [interimText, setInterimText] = useState('');
   const [language, setLanguage] = useState<'en-US' | 'es-ES'>('en-US');
-  const recognitionRef = useRef<SpeechRecognition | null>(null);
-  const isInitializedRef = useRef(false);
-  const isStartingRef = useRef(false);
 
-  /**
-   * Safely stops the speech recognition
-   */
-  const stopRecognition = () => {
-    if (recognitionRef.current) {
-      try {
-        recognitionRef.current.stop();
-      } catch {
-        // Ignore errors from stopping an already stopped recognition
-      }
-      isInitializedRef.current = false;
-      setIsListening(false);
-    }
-  };
+  const recognitionRef = useRef<any>(null);
 
-  /**
-   * Initializes the speech recognition instance
-   */
   const initializeRecognition = () => {
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+
     if (!SpeechRecognition) {
       alert('Speech Recognition is not supported in this browser');
       return;
     }
-
-    // Clean up existing recognition if it exists
-    stopRecognition();
 
     const recognition = new SpeechRecognition();
     recognition.continuous = true;
@@ -106,19 +38,20 @@ const SpeechToText = () => {
     recognition.lang = language;
 
     recognition.onresult = (event: SpeechRecognitionEvent) => {
-      const results = Array.from(event.results);
-      const final = results
-        .filter(result => result.isFinal)
-        .map(result => result[0].transcript)
-        .join(' ');
-      
-      const interim = results
-        .filter(result => !result.isFinal)
-        .map(result => result[0].transcript)
-        .join('');
+      let final = '';
+      let interim = '';
+
+      for (let i = event.resultIndex; i < event.results.length; ++i) {
+        const result = event.results[i];
+        if (result.isFinal) {
+          final += result[0].transcript + ' ';
+        } else {
+          interim += result[0].transcript;
+        }
+      }
 
       if (final) {
-        setSpokenText(prev => prev + final + ' ');
+        setSpokenText((prev) => prev + final);
         setInterimText('');
       } else {
         setInterimText(interim);
@@ -126,79 +59,43 @@ const SpeechToText = () => {
     };
 
     recognition.onend = () => {
-      isStartingRef.current = false;
       setIsListening(false);
-      isInitializedRef.current = false;
-    };
-
-    recognition.onerror = (event: SpeechRecognitionErrorEvent) => {
-      console.error('Speech recognition error:', event.error, event.message);
-      isStartingRef.current = false;
-      setIsListening(false);
-      isInitializedRef.current = false;
     };
 
     recognitionRef.current = recognition;
-    isInitializedRef.current = true;
   };
 
   useEffect(() => {
     initializeRecognition();
-    return () => {
-      stopRecognition();
-    };
-  }, [language]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [language]); // re-initialize when language changes
 
-  /**
-   * Toggles speech recognition on/off
-   */
-  const toggleListening = async () => {
-    if (!recognitionRef.current || isStartingRef.current) return;
-    
-    try {
-      if (!isListening) {
-        isStartingRef.current = true;
-        if (!isInitializedRef.current) {
-          initializeRecognition();
-        }
-        // Add a small delay to ensure the previous instance is fully stopped
-        await new Promise(resolve => setTimeout(resolve, 100));
-        recognitionRef.current.start();
-        setIsListening(true);
-      } else {
-        stopRecognition();
-      }
-    } catch (error) {
-      console.error('Error toggling speech recognition:', error instanceof Error ? error.message : 'Unknown error');
-      isStartingRef.current = false;
+  const toggleListening = () => {
+    if (!recognitionRef.current) return;
+
+    if (!isListening) {
+      recognitionRef.current.start();
+      setIsListening(true);
+    } else {
+      recognitionRef.current.stop();
       setIsListening(false);
-      isInitializedRef.current = false;
     }
   };
 
-  /**
-   * Handles language change and restarts recognition if active
-   */
-  const handleLanguageChange = async (e: React.ChangeEvent<HTMLSelectElement>) => {
-    const newLang = e.target.value as 'en-US' | 'es-ES';
-    setLanguage(newLang);
+  const handleLanguageChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const selectedLang = e.target.value as 'en-US' | 'es-ES';
 
     if (isListening && recognitionRef.current) {
-      try {
-        stopRecognition();
-        // Add a small delay before reinitializing
-        await new Promise(resolve => setTimeout(resolve, 300));
+      recognitionRef.current.onend = () => {
+        setLanguage(selectedLang);
         initializeRecognition();
-        if (isListening) {
-          isStartingRef.current = true;
-          recognitionRef.current.start();
-        }
-      } catch (error) {
-        console.error('Error handling language change:', error instanceof Error ? error.message : 'Unknown error');
-        isStartingRef.current = false;
-        setIsListening(false);
-        isInitializedRef.current = false;
-      }
+        recognitionRef.current.start();
+        recognitionRef.current.onend = () => setIsListening(false); // restore default
+      };
+
+      recognitionRef.current.stop();
+    } else {
+      setLanguage(selectedLang);
     }
   };
 
@@ -232,4 +129,4 @@ const SpeechToText = () => {
   );
 };
 
-export default SpeechToText;
+export default SpeechToLetter;
